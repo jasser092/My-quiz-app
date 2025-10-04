@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Quiz محلي — English → Arabic (App)</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <style>
+    :root{--accent:#2563eb;--ok:#16a34a;--bad:#dc2626}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f3f4f6;margin:0;padding:18px}
+    .app{width:420px;max-width:96vw;background:white;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.08);overflow:hidden}
+    header{padding:14px;border-bottom:1px solid #eef2ff;background:linear-gradient(90deg,#eef2ff, #ffffff);}
+    h1{margin:0;font-size:17px;color:#0f172a}
+    .content{padding:14px}
+    textarea{width:100%;height:110px;padding:10px;border:1px solid #e6edf6;border-radius:8px;resize:vertical;direction:ltr}
+    .row{display:flex;gap:8px;margin-top:10px}
+    button{flex:1;padding:10px;border-radius:8px;border:0;background:var(--accent);color:white;font-weight:600;cursor:pointer}
+    button.secondary{background:#e6eefc;color:var(--accent);border:1px solid #cfe0ff}
+    .quiz{display:none;gap:12px;flex-direction:column;align-items:center}
+    .face{font-size:64px}
+    .eng{font-size:28px;font-weight:700;margin:6px 0}
+    .options{width:100%;display:flex;flex-direction:column;gap:8px}
+    .opt{padding:12px;border-radius:8px;border:1px solid #e6edf6;background:#fff;text-align:right;cursor:pointer;color:#0f172a}
+    .opt.correct{border-color:var(--ok);background:rgba(16,185,129,0.12);color:#064e3b}
+    .opt.wrong{border-color:var(--bad);background:rgba(220,38,38,0.06);color:#7f1d1d}
+    .meta{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:14px;color:#334155}
+    .small{font-size:13px;color:#64748b}
+    footer{padding:10px;text-align:center;border-top:1px solid #eef2ff;background:#fbfdff}
+    .hint{font-size:13px;color:#475569}
+    input[type="text"]{width:100%;padding:8px;border-radius:8px;border:1px solid #e6edf6}
+    .controls{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Quiz محلي — حفظ ودمج الكلمات</h1>
+    </header>
+    <div class="content">
+      <div id="setup">
+        <p class="small">ألصق كلمات جديدة بأي من الصيغ التالية (مثالان):</p>
+        <pre style="background:#f8fafc;padding:8px;border-radius:6px;border:1px solid #eef2ff;direction:ltr">Book=كتاب She=هي Red=أحمر House=بيت Water=ماء
+أو كل سطر: Book=كتاب
+She=هي
+Red=أحمر</pre>
+        <textarea id="pairs" placeholder="أدخل الكلمات هنا — مسافات أو أسطر أو فواصل مقبولة"></textarea>
+
+        <div class="controls">
+          <button id="merge">أضف/ادمج الكلمات (حفظ محلي)</button>
+          <button id="start" class="secondary">ابدأ الاختبار</button>
+          <button id="clearAll" class="secondary">حذف كل الكلمات</button>
+        </div>
+
+        <div class="controls">
+          <button id="show" class="secondary">عرض عدد الكلمات</button>
+          <button id="export" class="secondary">تصدير (نسخ إلى الحافظة)</button>
+        </div>
+
+        <p class="hint">عند إضافة قوائم جديدة تُدمج الكلمات تلقائيًا — الكلمات المكرّرة تُحذف بناءً على الكلمة الإنجليزية (غير حساسة لحالة الأحرف). إذا أردت تحديث ترجمة كلمة موجودة، أضفها بصيغة جديدة وسيتم استبدال الترجمة القديمة.</p>
+      </div>
+
+      <div id="quiz" class="quiz">
+        <div class="face">🙂</div>
+        <div class="eng" id="english">WORD</div>
+        <div class="options" id="options"></div>
+        <div class="meta">
+          <div class="small">السؤال <span id="index">0</span>/<span id="total">0</span></div>
+          <div class="small">درجة: <span class="score" id="score">0</span></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button id="next" class="secondary">التالي</button>
+          <button id="back" class="secondary">قائمة الكلمات</button>
+        </div>
+      </div>
+
+    </div>
+    <footer>
+      <div class="small">الكلمات محفوظة محليًا فقط على جهازك. النسخة هذه تعمل بالكامل بلا اتصال.</div>
+    </footer>
+  </div>
+
+<script>
+// Register service worker for offline/PWA behavior
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('service-worker.js').catch(function(err){ console.log('SW register failed', err); });
+  });
+}
+
+(function(){
+  const STORAGE_KEY = 'english_ar_pairs_v2';
+  const pairsInput = document.getElementById('pairs');
+  const mergeBtn = document.getElementById('merge');
+  const startBtn = document.getElementById('start');
+  const showBtn = document.getElementById('show');
+  const exportBtn = document.getElementById('export');
+  const clearAllBtn = document.getElementById('clearAll');
+  const quizEl = document.getElementById('quiz');
+  const setupEl = document.getElementById('setup');
+  const englishEl = document.getElementById('english');
+  const optionsEl = document.getElementById('options');
+  const indexEl = document.getElementById('index');
+  const totalEl = document.getElementById('total');
+  const scoreEl = document.getElementById('score');
+  const nextBtn = document.getElementById('next');
+  const backBtn = document.getElementById('back');
+
+  let pairs = []; // array of {en, ar}
+  let order = [];
+  let cur = 0;
+  let score = 0;
+  let answered = false;
+  let autoAdvanceDelay = 700; // ms
+
+  function loadFromStorage(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return [];
+      const parsed = JSON.parse(raw);
+      if(Array.isArray(parsed)) return parsed;
+      return [];
+    }catch(e){ return []; }
+  }
+
+  function saveToStorage(list){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); return true; }
+    catch(e){ return false; }
+  }
+
+  // Parse input flexibly:
+  function parseInput(text){
+    if(!text) return [];
+    let t = text.replace(/[؛;]/g, '\\n').replace(/[，,]+/g, '\\n');
+    t = t.trim();
+    let tokens = [];
+    if(t.includes('\\n')) tokens = t.split(/\\n+/).map(s=>s.trim()).filter(Boolean);
+    else tokens = t.split(/\\s+/).map(s=>s.trim()).filter(Boolean);
+    const out = [];
+    for(const token of tokens){
+      const parts = token.split(/=|:|,/).map(p=>p.trim()).filter(Boolean);
+      if(parts.length>=2){
+        for(let i=0;i+1<parts.length;i+=2){
+          const en = parts[i];
+          const ar = parts[i+1];
+          out.push({en: en, ar: ar});
+        }
+      }
+    }
+    return out;
+  }
+
+  function normalizeEn(en){ return en.trim().toLowerCase(); }
+
+  function mergeWithStorage(newList){
+    const stored = loadFromStorage();
+    const map = new Map();
+    for(const p of stored){ map.set(normalizeEn(p.en), {en:p.en, ar:p.ar}); }
+    let added=0, updated=0;
+    for(const p of newList){
+      const key = normalizeEn(p.en);
+      if(map.has(key)){
+        const existing = map.get(key);
+        if(existing.ar !== p.ar){
+          map.set(key, {en: p.en, ar: p.ar});
+          updated++;
+        }
+      } else {
+        map.set(key, {en: p.en, ar: p.ar});
+        added++;
+      }
+    }
+    const result = Array.from(map.values());
+    saveToStorage(result);
+    return {added, updated, total: result.length};
+  }
+
+  function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a }
+
+  function buildOrder(){ pairs = loadFromStorage(); order = pairs.map((p,i)=>i); shuffle(order); cur=0; score=0; updateScore(); }
+
+  function updateScore(){ scoreEl.textContent = score; }
+
+  function renderCard(){
+    if(order.length===0){
+      alert('لا توجد كلمات محفوظة. أضف كلمات أولاً.'); setupEl.style.display='block'; quizEl.style.display='none'; return;
+    }
+    const idx = order[cur];
+    const item = pairs[idx];
+    englishEl.textContent = item.en;
+    indexEl.textContent = cur+1; totalEl.textContent = order.length;
+    answered=false;
+
+    const others = pairs.map(p=>p.ar).filter((a,i)=>i!==idx);
+    let choices = [item.ar];
+    shuffle(others);
+    for(let i=0;i<2;i++){ if(others[i]) choices.push(others[i]); }
+    while(choices.length<3){ choices.push(item.ar + Math.random().toString(36).slice(2,4)); }
+    choices = shuffle(choices.slice());
+
+    optionsEl.innerHTML = '';
+    choices.forEach((text,i)=>{
+      const btn = document.createElement('button');
+      btn.className='opt'; btn.type='button'; btn.innerText = text || '';
+      btn.addEventListener('click',()=> selectOption(btn, text, item.ar));
+      optionsEl.appendChild(btn);
+    });
+  }
+
+  function finishTest(){
+    alert('انتهى الاختبار. نتيجتك: ' + score + ' من ' + order.length);
+    setupEl.style.display='block'; quizEl.style.display='none';
+  }
+
+  function goNextOrFinish(){
+    cur++;
+    if(cur>=order.length){ finishTest(); }
+    else { renderCard(); }
+  }
+
+  function selectOption(btn, chosen, correct){
+    if(answered) return; answered=true;
+    const buttons = optionsEl.querySelectorAll('button');
+    buttons.forEach(b=>b.disabled=true);
+    if(chosen===correct){ btn.classList.add('correct'); score++; updateScore();
+      setTimeout(()=>{ goNextOrFinish(); }, autoAdvanceDelay);
+    }
+    else { btn.classList.add('wrong');
+      for(const b of buttons){ if(b.innerText===correct) b.classList.add('correct'); }
+    }
+  }
+
+  mergeBtn.addEventListener('click', ()=>{
+    const newList = parseInput(pairsInput.value);
+    if(newList.length===0){ alert('لم يتم قراءة أي كلمات. استخدم الصيغة: English=Arabic لكل كلمة.'); return; }
+    const res = mergeWithStorage(newList);
+    alert('تمت الإضافة: ' + res.added + '، التحديث: ' + res.updated + '، المجموع الآن: ' + res.total + ' كلمة.');
+    pairsInput.value = '';
+  });
+
+  showBtn.addEventListener('click', ()=>{
+    const stored = loadFromStorage();
+    alert('الكلمات المحفوظة: ' + stored.length + ' كلمة.');
+  });
+
+  exportBtn.addEventListener('click', async ()=>{
+    try{
+      const stored = loadFromStorage();
+      if(stored.length===0){ alert('لا توجد كلمات للتصدير.'); return; }
+      const text = stored.map(p=>p.en + '=' + p.ar).join('\\n');
+      await navigator.clipboard.writeText(text);
+      alert('تم نسخ الكلمات إلى الحافظة. يمكنك لصقها في ملف أو مكان آخر.');
+    }catch(e){
+      const stored = loadFromStorage();
+      const text = stored.map(p=>p.en + '=' + p.ar).join('\\n');
+      prompt('انسخ النص التالي (Ctrl+C):', text);
+    }
+  });
+
+  clearAllBtn.addEventListener('click', ()=>{
+    if(confirm('هل تريد حذف كل الكلمات المحفوظة؟ هذا الإجراء لا يمكن التراجع عنه.')){ localStorage.removeItem(STORAGE_KEY); alert('تم الحذف.'); }
+  });
+
+  startBtn.addEventListener('click', ()=>{
+    const stored = loadFromStorage();
+    if(stored.length===0){ alert('لا توجد كلمات محفوظة. أضف كلمات أولاً.'); return; }
+    buildOrder(); setupEl.style.display='none'; quizEl.style.display='flex'; renderCard();
+  });
+
+  nextBtn.addEventListener('click', ()=>{
+    if(order.length===0) return;
+    goNextOrFinish();
+  });
+
+  backBtn.addEventListener('click', ()=>{
+    setupEl.style.display='block'; quizEl.style.display='none';
+  });
+
+  window.addEventListener('keydown',(e)=>{
+    if(quizEl.style.display!=='flex') return;
+    if(['1','2','3'].includes(e.key)){
+      const idx = Number(e.key)-1;
+      const btn = optionsEl.querySelectorAll('button')[idx]; if(btn) btn.click();
+    }
+    if(e.key==='ArrowRight') document.getElementById('next').click();
+  });
+})(); 
+</script>
+</body>
+</html>
